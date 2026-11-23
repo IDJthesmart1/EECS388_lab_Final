@@ -87,13 +87,13 @@ bool isTimerRunning[3] = { false, false, false }; // Track the running state of 
  *******************************************************************************/
 
 /******************************************************************************
-*   Function: gpio_mode() - GPIO Mode
-*      Pre condition:
-*          This should be called during the setup() initialization function
-*      Post condition:
-*          GPIO specified by 'pin' will be configured in the mode specified by
-* 			'mode' (either GPIO_OUTPUT or GPIO_INPUT)
-*******************************************************************************/
+ *   Function: gpio_mode() - GPIO Mode
+ *      Pre condition:
+ *          This should be called during the setup() initialization function
+ *      Post condition:
+ *          GPIO specified by 'pin' will be configured in the mode specified by
+ * 			'mode' (either GPIO_OUTPUT or GPIO_INPUT)
+ *******************************************************************************/
 void gpio_mode(uint8_t pin, uint8_t mode) {
   uint8_t bit = digitalPinToBitMask(pin);
   uint8_t port = digitalPinToPort(pin);
@@ -180,26 +180,4 @@ void uart_init() {
   UCSR0B = (1 << RXEN0) | (1 << TXEN0) | (1 << RXCIE0);
   // 8-bit signal, (7 data bits, no parity, 1 stop, async)
   UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
-}
-
-
-
-Timer ctc_init(uint32_t period_us) {
-  if (!isTimerRunning[0]) {
-    isTimerRunning[0] = true;
-    setup_period(0, period_us);
-    Timer ret = { TIMER0_COMPA_vect };
-    return { ret };
-  } else if (!isTimerRunning[1]) {
-    isTimerRunning[1] = true;
-    setup_period(1, period_us);
-    Timer ret = { TIMER1_COMPA_vect };
-    return { ret };
-  } else if (!isTimerRunning[2]) {
-    isTimerRunning[2] = true;
-    setup_period(2, period_us);
-    Timer ret = { TIMER2_COMPA_vect };
-    return { ret };
-  }
-  return { 0 }; // No available timers
 }
