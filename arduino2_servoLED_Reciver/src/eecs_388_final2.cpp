@@ -8,10 +8,11 @@ extern "C" {
 }
 
 #include "eecs_388_lib.hpp"
+#include "minimal_timer_lib.hpp"
 
-/******************************************************************************
- *   Constant definitions
- *******************************************************************************/
+//------------------------------------------------------------------------------
+// Constant definitions
+//------------------------------------------------------------------------------
 
 /*ServoMotor constants*/
 #define SERVO_PULSE_MAX (2400)    /* 2400 us (2.4ms) */
@@ -32,33 +33,17 @@ struct LED {
   uint8_t state; // 0 = off, 1 = on, 2 = flashing
 };
 
-LED red = { GPIO_13, false };
+LED red = { GPIO_11, false };
 LED green = { GPIO_12, false };
-LED blue = { GPIO_11, false };
 
 struct Servo {
   uint8_t pin;
   int angle_state;
 };
 
-Servo steering = { GPIO_7, MIN_ANGLE };
-
-struct Timer {
-  uint8_t periodic_ISR_vector;
-  uint8_t timer_gpio_pin;
-};
-
-Timer ctc_timer;
+Servo steering = { GPIO_9, MIN_ANGLE };
 
 //-------------------------------------------------------------------------------
-
-void toggle(LED& led) {
-  if (led.state == 0) {
-    turnOn(led);
-  } else {
-    turnOff(led);
-  }
-}
 
 void turnOn(LED& led) {
   gpio_write(led.pin, ON);
@@ -70,8 +55,16 @@ void turnOff(LED& led) {
   led.state = 0;
 }
 
+void toggle(LED& led) {
+  if (led.state == 0) {
+    turnOn(led);
+  } else {
+    turnOff(led);
+  }
+}
+
 void flash(LED& led) {
-  enable(ctc_timer.timer_gpio_pin);
+  ctcm_init<2, 100000, 1>(); // 100ms period, GPIO_11
   led.state = 2;
 }
 
@@ -127,24 +120,22 @@ static void goToAngle(Servo servo, int angle) {
  *          calib_data is filled with calibration data from BMP180
  *******************************************************************************/
 void setup() {
-  uart_init();     // Initialize UART for serial output
+  uart_init();     // Initialize UART for serial communication
 
   //Setup Auto-break LEDs for Distance
-  gpio_mode(GPIO_13, GPIO_OUTPUT); //RED
   gpio_mode(GPIO_12, GPIO_OUTPUT); //GREEN
-  gpio_mode(GPIO_11, GPIO_OUTPUT); //BLUE
-
-  // Initialize 100ms CTC Timer for LED flashing
-  ctc_timer = ctc_init(100000); // Convert ms to us
+  gpio_mode(GPIO_11, GPIO_OUTPUT); //RED
 }
 
+int8_t acceleration = 0; // global variable to track acceleration, measured in 0.2 mph per 1/50 of a second (1 mph per second)
+// 1 = accelerating / no breaking, -1 = brake lightly, -2 = brake hard, -3 = must stop
 /******************************************************************************
  *   Function: ISR(USART_RX_vect) - UART Receive Data Interrupt Service Routine
  *      Pre condition:
- *          setup() has been executed and system is initialized
+ *          uart_setup() has been executed and system is initialized
  *      Post condition:
- *          Performs a single iteration of the system's function
- *          Repeates indefinetely unless the board is reset or powered off
+ *          Reads the UART data register if and only if data has been received,
+ *          and sets the LED states based on the received distance value
  *******************************************************************************/
 ISR(USART_RX_vect) {
   // distance is now a value between 0 and 255 where each unit represents 2 cm
@@ -153,18 +144,52 @@ ISR(USART_RX_vect) {
   if (distance_received > 200) {
     turnOn(green);
     turnOff(red);
+    acceleration = 1;
   } else if (distance_received > 100) {
     turnOn(red);
     turnOn(green);
+    acceleration = -1;
   } else if (distance_received > 60) {
     turnOn(red);
     turnOff(green);
+    acceleration = -2;
   } else {
     flash(red);
     turnOff(green);
+    acceleration = -3;
   }
 
 }
+
+#define TOP_SPEED 500 // 100 mph in 0.2 mph increments
+uint32_t speed = 0; // global variable to track speed, measured in 0.2mph increments
+// Acceleration: no breaking: 0 to 60 in 6 seconds, brake lightly: 60 to 0 in 6 seconds
+//               brake hard: 60 to 0 in 3 seconds, must stop: 60 to 0 in 3 seconds
+/******************************************************************************
+ *   Function: ISR(TIMER1_CAPT_vect) - Servo PWM Interrupt Service Routine
+ *      Description:
+ *          This function is called every 20ms exactly (50 Hz),
+ *          and updates the servo's duty cycle to the new calculated angle value
+ *          The changes take effect exactly one period delayed
+ *      Pre condition:
+ *          timer 1 is initialized
+ *      Post condition:
+ *          Updates the speed variable based on the current acceleration value
+ *******************************************************************************/
+ISR(TIMER1_CAPT_vect) {
+  // Only possible values for acceleration are 1, -1, -2, and -3
+  // Speed is anything from 0 to 500
+  if (acceleration == 1 && speed < TOP_SPEED) {
+    speed++; // Prevent speed from overflowing
+  } else if (speed > 3) {
+    speed = static_cast<uint32_t>(speed + acceleration); // Update speed based on the acceleration
+  } else if (speed <= 3) {
+    // snap to zero if speed is less than or equal to 3 (0.6 mph)
+    speed = 0; // Prevent speed from underflowing
+  }
+
+}
+
 
 /******************************************************************************
  *   Function: loop() - Main execution loop
@@ -207,8 +232,4 @@ void loop() {
   / The servo angle represents the absolute angle of the car, and it takes longer to turn at high speeds. - Approved by TA
   */
 
-
-  for (int i : ANGLE_VALUES) {
-    goToAngle(steering, i);
-  }
 }

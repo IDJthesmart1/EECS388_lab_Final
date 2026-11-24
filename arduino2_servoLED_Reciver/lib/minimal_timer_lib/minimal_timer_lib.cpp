@@ -45,16 +45,16 @@ namespace {
     //       0b00 = none, 0b01 = CTC toggle each period, 0b11 = PWM
     if (timer_id == 0) {
       TCCR0A = (TCCR0A & ~0b11110000) | (ctrl << 4);
-      if (ctrl & 0b1100) DDRD |= (1 << PD6); // Set PD6 as output if enabled
-      if (ctrl & 0b0011) DDRD |= (1 << PD5); // Set PD5 pin as output if enabled
+      if (ctrl & 0b1100) DDRD |= (1 << PD6); // Set GPIO_6 as output if enabled
+      if (ctrl & 0b0011) DDRD |= (1 << PD5); // Set GPIO_5 as output if enabled
     } else if (timer_id == 1) {
       TCCR1A = (TCCR1A & ~0b11110000) | (ctrl << 4);
-      if (ctrl & 0b1100) DDRB |= (1 << PB1); // Set PB1 as output if enabled
-      if (ctrl & 0b0011) DDRB |= (1 << PB2); // Set PB2 as output if enabled
+      if (ctrl & 0b1100) DDRB |= (1 << PB1); // Set GPIO_9 as output if enabled
+      if (ctrl & 0b0011) DDRB |= (1 << PB2); // Set GPIO_10 as output if enabled
     } else {
       TCCR2A = (TCCR2A & ~0b11110000) | (ctrl << 4);
-      if (ctrl & 0b1100) DDRB |= (1 << PB3); // Set PB3 as output if enabled
-      if (ctrl & 0b0011) DDRD |= (1 << PD3); // Set PD3 as output if enabled
+      if (ctrl & 0b1100) DDRB |= (1 << PB3); // Set GPIO_11 as output if enabled
+      if (ctrl & 0b0011) DDRD |= (1 << PD3); // Set GPIO_3 as output if enabled
     }
   }
 
