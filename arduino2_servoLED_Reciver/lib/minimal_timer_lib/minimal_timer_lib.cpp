@@ -1,8 +1,8 @@
 extern "C" {
-#include <avr/io.h>
-
 #include <stdint.h>
 }
+
+#include <avr/io.h>
 
 #include "minimal_timer_lib.hpp"
 
@@ -33,9 +33,20 @@ namespace {
     if (timer_id == 0) {
       OCR0A = static_cast<uint8_t>(top);
     } else if (timer_id == 1) {
-      ICR1 = top;
+      OCR1A = top;
     } else {
       OCR2A = static_cast<uint8_t>(top);
+    }
+  }
+
+  void config_compare(uint8_t timer_id, uint16_t top, uint8_t duty_cycle) {
+    const uint16_t compare = duty_cycle * (top / 200);
+    if (timer_id == 0) {
+      OCR0B = static_cast<uint8_t>(compare);
+    } else if (timer_id == 1) {
+      OCR1B = compare;
+    } else {
+      OCR2B = static_cast<uint8_t>(compare);
     }
   }
 
@@ -44,17 +55,14 @@ namespace {
     // ctrl: 0bXXXX first two bits = channel A, second two bits = channel B
     //       0b00 = none, 0b01 = CTC toggle each period, 0b11 = PWM
     if (timer_id == 0) {
-      TCCR0A = (TCCR0A & ~0b11110000) | (ctrl << 4);
-      if (ctrl & 0b1100) DDRD |= (1 << PD6); // Set GPIO_6 as output if enabled
-      if (ctrl & 0b0011) DDRD |= (1 << PD5); // Set GPIO_5 as output if enabled
+      TCCR0A = (TCCR0A & ~0b00110000) | (ctrl << 4);
+      DDRD |= (1 << PD5); // Set GPIO_5 as output
     } else if (timer_id == 1) {
-      TCCR1A = (TCCR1A & ~0b11110000) | (ctrl << 4);
-      if (ctrl & 0b1100) DDRB |= (1 << PB1); // Set GPIO_9 as output if enabled
-      if (ctrl & 0b0011) DDRB |= (1 << PB2); // Set GPIO_10 as output if enabled
+      TCCR1A = (TCCR1A & ~0b00110000) | (ctrl << 4);
+      DDRB |= (1 << PB2); // Set GPIO_10 as output
     } else {
-      TCCR2A = (TCCR2A & ~0b11110000) | (ctrl << 4);
-      if (ctrl & 0b1100) DDRB |= (1 << PB3); // Set GPIO_11 as output if enabled
-      if (ctrl & 0b0011) DDRD |= (1 << PD3); // Set GPIO_3 as output if enabled
+      TCCR2A = (TCCR2A & ~0b00110000) | (ctrl << 4);
+      DDRD |= (1 << PD3); // Set GPIO_3 as output
     }
   }
 
@@ -66,6 +74,28 @@ namespace {
       TCCR1B = (TCCR1B & ~0b111) | (scaler);
     } else {
       TCCR2B = (TCCR2B & ~0b111) | (scaler);
+    }
+  }
+
+  void config_interrupt(uint8_t timer_id, bool enable) {
+    if (timer_id == 0) {
+      if (enable) {
+        TIMSK0 |= (1 << OCIE0A);
+      } else {
+        TIMSK0 &= ~(1 << OCIE0A);
+      }
+    } else if (timer_id == 1) {
+      if (enable) {
+        TIMSK1 |= (1 << OCIE1A);
+      } else {
+        TIMSK1 &= ~(1 << OCIE1A);
+      }
+    } else {
+      if (enable) {
+        TIMSK2 |= (1 << OCIE2A);
+      } else {
+        TIMSK2 &= ~(1 << OCIE2A);
+      }
     }
   }
 
@@ -148,32 +178,29 @@ namespace {
 
 namespace timer_detail {
 
-  void ctcm_apply(uint8_t timer_id, uint32_t period_us, uint8_t channel) {
+  void ctcm_apply(uint8_t timer_id, uint32_t period_us, bool channel, bool interrupt) {
     if (timer_id != 1) {
       config_mode(timer_id, 2);  // CTC mode for 8-bit timers
     } else {
-      config_mode(timer_id, 12); // CTC mode (ICR1 as TOP) for 16-bit timer
+      config_mode(timer_id, 12); // CTC mode for 16-bit timer
     }
 
     // Output toggles each compare match, so the compare period is half the output period
-    Config config = lookup_config(timer_id, period_us / 2);
+    Config config = lookup_config(timer_id, period_us);
 
     config_top(timer_id, config.ticks);
+    config_compare(timer_id, config.ticks, 200); // compare = TOP
 
-    if (channel == 0) {
-      config_channel(timer_id, 0b0000);
-    } else if (channel == 1) {
-      config_channel(timer_id, 0b0100);
-    } else if (channel == 2) {
-      config_channel(timer_id, 0b0001);
+    if (channel) {
+      config_channel(timer_id, 0b01);
     } else {
-      config_channel(timer_id, 0b0101);
+      config_channel(timer_id, 0b00);
     }
 
     config_scaler(timer_id, config.scaler);
   }
 
-  void fpwm_apply(uint8_t timer_id, uint32_t period_us, uint8_t channel) {
+  void fpwm_apply(uint8_t timer_id, uint32_t period_us, bool channel, bool interrupt, uint8_t duty_cycle) {
     if (timer_id != 1) {
       config_mode(timer_id, 7);  // Fast PWM mode for 8-bit timers
     } else {
@@ -183,18 +210,22 @@ namespace timer_detail {
     Config config = lookup_config(timer_id, period_us);
 
     config_top(timer_id, config.ticks);
+    config_compare(timer_id, config.ticks, duty_cycle);
 
-    if (channel == 0) {
-      config_channel(timer_id, 0b0000);
-    } else if (channel == 1) {
-      config_channel(timer_id, 0b1000);
-    } else if (channel == 2) {
-      config_channel(timer_id, 0b0010);
+    if (channel) {
+      config_channel(timer_id, 0b10);
     } else {
-      config_channel(timer_id, 0b1010);
+      config_channel(timer_id, 0b00);
     }
+
+    config_interrupt(timer_id, interrupt); // Disable compare match interrupt
 
     config_scaler(timer_id, config.scaler);
   }
 
 } // namespace timer_detail
+
+void fpwm_update(uint8_t timer_id, uint32_t period_us, uint8_t duty_cycle) {
+  Config config = lookup_config(timer_id, period_us);
+  config_compare(timer_id, config.ticks, duty_cycle); // Update compare value for PWM duty cycle
+}
