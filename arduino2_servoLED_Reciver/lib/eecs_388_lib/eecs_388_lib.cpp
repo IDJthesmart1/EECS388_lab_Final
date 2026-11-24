@@ -3,18 +3,16 @@
  *******************************************************************************/
 
 extern "C" {
+#include <stdint.h>
+}
+
 #include <avr/io.h>
 #include <util/delay.h>
 #include <util/twi.h>
 #include "wiring_private.h"
 #include "pins_arduino.h"
 
-#include <stdint.h>
-}
-
 #include "eecs_388_lib.hpp"
-
-#define SCL_CLOCK (100000L)  // 100kHz I2C clock speed
 
 /******************************************************************************
  *   Static functions
@@ -79,8 +77,6 @@ static void turnOffPWM(uint8_t timer) {
 #endif
   }
 }
-
-bool isTimerRunning[3] = { false, false, false }; // Track the running state of each timer
 
 /******************************************************************************
  *   Library functions

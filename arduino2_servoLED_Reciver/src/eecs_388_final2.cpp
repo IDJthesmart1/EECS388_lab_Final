@@ -3,10 +3,10 @@
  *******************************************************************************/
 
 extern "C" {
-#include <Arduino.h>
 #include <stdint.h>
 }
 
+#include <Arduino.h>
 #include "eecs_388_lib.hpp"
 #include "minimal_timer_lib.hpp"
 
@@ -64,50 +64,13 @@ void toggle(LED& led) {
 }
 
 void flash(LED& led) {
-  ctcm_init<2, 100000, 1>(); // 100ms period, GPIO_11
+  ctcm_init<2, 14286, true, false>(); // 100ms period divided into 7 (16ms max), GPIO_11
   led.state = 2;
 }
 
 const unsigned long pulse_range = SERVO_PULSE_MAX - SERVO_PULSE_MIN;
 const unsigned long angle_range = MAX_ANGLE - MIN_ANGLE;
-/******************************************************************************
- *   Function: goToAngle() - Servo Motor Pulse
- *      Pre condition:
- *          Assumes GPIO pin used has been configured for output
- *          Assumes GPIO pin is off at call time
- *      Post condition:
- *          Calculates a duty cycle in microseconds for the amount of on time
- *          needed to achieve the angle passed in
- *      Input:
- *          gpio - GPIO pin number to use for the servo
- *          angle - Angle to set the servo to (0 to 180 degrees)
- *******************************************************************************/
-static void goToAngle(Servo servo, int angle) {
-  unsigned long int on_time_us;
-  unsigned long int off_time_us;
-  if (angle < MIN_ANGLE) {
-    on_time_us = SERVO_PULSE_MIN;
-  } else if (angle > MAX_ANGLE) {
-    on_time_us = SERVO_PULSE_MAX;
-  } else {
-    on_time_us = SERVO_PULSE_MIN + ((unsigned long)(angle - MIN_ANGLE) * pulse_range) / angle_range;
-  }
-  off_time_us = SERVO_PERIOD - on_time_us;
 
-  int travel_degrees = abs(angle - servo.angle_state);
-  int loops = (travel_degrees * SERVO_SPEED) / SERVO_PERIOD;
-  for (int i = 0; i <= loops; i++) {
-    gpio_write(servo.pin, 1);
-    delay_ms(on_time_us / 1000);
-    delay_us(on_time_us % 1000);
-    gpio_write(servo.pin, 0);
-    delay_ms(off_time_us / 1000);
-    delay_us(off_time_us % 1000);
-  }
-  servo.angle_state = angle;
-
-  return;
-}
 
 /******************************************************************************
  *   Function: setup() - Initializes the Arduino System
@@ -121,6 +84,9 @@ static void goToAngle(Servo servo, int angle) {
  *******************************************************************************/
 void setup() {
   uart_init();     // Initialize UART for serial communication
+
+  sei();
+  fpwm_init<1, 20000, true, true, 0>();
 
   //Setup Auto-break LEDs for Distance
   gpio_mode(GPIO_12, GPIO_OUTPUT); //GREEN
@@ -163,6 +129,11 @@ ISR(USART_RX_vect) {
 
 #define TOP_SPEED 500 // 100 mph in 0.2 mph increments
 uint32_t speed = 0; // global variable to track speed, measured in 0.2mph increments
+
+#define NUM_ANGLES 11
+volatile uint32_t current_angle_f = ANGLE_VALUES[0];
+volatile uint32_t angle_index = 0;
+
 // Acceleration: no breaking: 0 to 60 in 6 seconds, brake lightly: 60 to 0 in 6 seconds
 //               brake hard: 60 to 0 in 3 seconds, must stop: 60 to 0 in 3 seconds
 /******************************************************************************
@@ -188,8 +159,33 @@ ISR(TIMER1_CAPT_vect) {
     speed = 0; // Prevent speed from underflowing
   }
 
-}
+  // no speed do nothing.
+  if (speed == 0) {
+    return;
+  }
 
+  // 10 deg/tick at speed=1, down to ~1 deg/tick at speed=500
+  float step_deg = 10.0f - ((float)speed / (float)TOP_SPEED) * 9.0f;
+  if (step_deg < 1.0f) step_deg = 1.0f;
+
+  float target = (float) ANGLE_VALUES[angle_index];
+  float diff = target - current_angle_f;
+
+  if (diff > step_deg) {
+    current_angle_f += step_deg;
+  } else if (diff < -step_deg) {
+    current_angle_f -= step_deg;
+  } else {
+    current_angle_f = target;
+    angle_index = (angle_index + 1) % NUM_ANGLES;
+  }
+  
+  uint32_t deg = (uint32_t) current_angle_f;
+  if (deg > MAX_ANGLE) deg = MAX_ANGLE;
+
+  uint32_t period = SERVO_PULSE_MIN + (uint32_t)(((uint64_t)deg * (SERVO_PULSE_MAX - SERVO_PULSE_MIN)) / MAX_ANGLE);
+  fpwm_update(1, 20, (period*1000)/20);
+}
 
 /******************************************************************************
  *   Function: loop() - Main execution loop
